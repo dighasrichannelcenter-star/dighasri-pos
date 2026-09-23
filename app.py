@@ -19,18 +19,21 @@ except Exception as e:
     st.error(f"Supabase Connection Error: {e}")
     st.stop()
 
-# Helper function to execute queries safely
+# Helper function to execute queries safely and reset index for neat 1, 2, 3... numbering
 def get_data(table_name):
     try:
-        res = supabase.table(table_name).select("*").execute()
-        return pd.DataFrame(res.data)
+        res = supabase.table(table_name).select("*").order("id", desc=True).execute()
+        df = pd.DataFrame(res.data)
+        if not df.empty:
+            df.index = range(1, len(df) + 1)  # Sets 1, 2, 3, 4... index numbering
+        return df
     except Exception as e:
         st.warning(f"Error fetching {table_name}: {e}")
         return pd.DataFrame()
 
 # Session State for Cart and User Login
 if "logged_in" not in st.session_state:
-    st.session_state.logged_in = True  # Default login for POS testing
+    st.session_state.logged_in = True
     st.session_state.username = "admin"
     st.session_state.role = "Admin"
 
@@ -58,6 +61,7 @@ with tab1:
             st.info("Cart එක හිස්ව පවතී. දකුණු පසින් අවශ්‍ය අයිතම එකතු කරන්න.")
         else:
             cart_df = pd.DataFrame(st.session_state.cart)
+            cart_df.index = range(1, len(cart_df) + 1)
             st.dataframe(cart_df, use_container_width=True)
             
             total_amt = sum(item["Price"] for item in st.session_state.cart)
@@ -65,7 +69,6 @@ with tab1:
             
             if st.button("💳 Print & Complete Sale", type="primary"):
                 try:
-                    # Save bill to Supabase
                     supabase.table("sales").insert({
                         "ref_no": patient_ref,
                         "total_amount": total_amt,
