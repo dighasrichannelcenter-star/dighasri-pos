@@ -773,13 +773,46 @@ if "📦 Master Settings & Inventory" in available_tabs:
                                 st.rerun()
 
 # ---------------------------------------------------------
-# TAB 3: REPORTS & ACCOUNTS (WITH CLOUD DATA FOR TAB VIEW)
+# TAB 3: REPORTS & ACCOUNTS (WITH ONE-CLICK CLOUD SYNC)
 # ---------------------------------------------------------
 rep_tab_index = available_tabs.index("📊 Reports & Accounts")
 with tabs[rep_tab_index]:
     st.subheader("📊 Reports & Inventory Tracking")
     
-    # 1. Cloud එකෙන් හෝ Local DB එකෙන් Data ලබා ගැනීම
+    # ONE-CLICK MANUAL CLOUD SYNC BUTTON
+    col_sync1, col_sync2 = st.columns([1, 2])
+    with col_sync1:
+        if st.button("🔄 Sync All Local Data to Cloud", type="primary", use_container_width=True):
+            try:
+                local_sales = pd.read_sql_query("SELECT * FROM sales_history", conn)
+                if not local_sales.empty and supabase:
+                    success_count = 0
+                    for _, row in local_sales.iterrows():
+                        data_dict = {
+                            'prescription_no': str(row['prescription_no']),
+                            'bill_type': str(row['bill_type']),
+                            'doctor_name': str(row['doctor_name']),
+                            'bill_details': str(row['bill_details']),
+                            'total_amount': float(row['total_amount']),
+                            'doc_fee': float(row['doc_fee']),
+                            'lab_cost': float(row['lab_cost']),
+                            'center_profit': float(row['center_profit']),
+                            'cost_price': float(row['cost_price']),
+                            'date': str(row['date']),
+                            'status': str(row['status'])
+                        }
+                        try:
+                            supabase.table("sales_history").insert(data_dict).execute()
+                            success_count += 1
+                        except:
+                            pass
+                    st.success(f"✅ ගනුදෙනු {success_count} ක් Cloud එකට සාර්ථකව Sync විය!")
+                    st.rerun()
+                else:
+                    st.info("Sync කිරීමට ගනුදෙනු නොමැත හෝ Cloud Connection නොමැත.")
+            except Exception as e:
+                st.error(f"Sync Error: {e}")
+
     sales_full_df = pd.DataFrame()
     if supabase:
         try:
