@@ -180,7 +180,7 @@ st.title("🏥 Dighasri Channel Center POS System")
 user_role = st.session_state.user['role']
 
 if user_role == "Admin":
-    available_tabs = ["🛒 POS Billing", "📦 Master Settings & Inventory", "📊 Reports & Accounts", "⚙️️ User Management"]
+    available_tabs = ["🛒 POS Billing", "📦 Master Settings & Inventory", "📊 Reports & Accounts", "⚙️ User Management"]
 elif user_role == "Supervisor":
     available_tabs = ["🛒 POS Billing", "📦 Master Settings & Inventory", "📊 Reports & Accounts"]
 else:
@@ -461,12 +461,6 @@ with tabs[rep_tab_index]:
             try:
                 local_sales = pd.read_sql_query("SELECT * FROM sales_history", conn)
                 if not local_sales.empty and supabase:
-                    # Clear duplicate cloud data first to mirror exact local database
-                    try:
-                        supabase.table("sales_history").delete().neq("id", 0).execute()
-                    except Exception:
-                        pass
-                    
                     success_count = 0
                     for _, row in local_sales.iterrows():
                         data_dict = {
@@ -485,16 +479,23 @@ with tabs[rep_tab_index]:
                         try:
                             supabase.table("sales_history").insert(data_dict).execute()
                             success_count += 1
-                        except:
+                        except Exception:
                             pass
-                    st.success(f"✅ ගනුදෙනු {success_count} ක් Cloud එකට නිවැරදිව Sync විය!")
+                    st.success(f"✅ ගනුදෙනු {success_count} ක් Cloud එකට සාර්ථකව Sync විය!")
                 else:
                     st.info("Sync කිරීමට ගනුදෙනු නොමැත හෝ Cloud Connection නොමැත.")
             except Exception as e:
                 st.error(f"Sync Error: {e}")
 
-    # FETCH FROM LOCAL DATABASE
+    # FETCH FROM BOTH SOURCES SMARTLY
     sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
+    if sales_full_df.empty and supabase:
+        try:
+            res = supabase.table("sales_history").select("*").order("id", desc=True).execute()
+            if res.data:
+                sales_full_df = pd.DataFrame(res.data)
+        except Exception:
+            pass
 
     main_rep_tab1, main_rep_tab2 = st.tabs(["💰 Financial Reports (ගිණුම් වාර්තා)", "⚠️ Expiry & Re-Order Tracking"])
    
@@ -573,7 +574,7 @@ with tabs[rep_tab_index]:
                 active_sales = sales_df
            
             sec_lab, sec_pharma, sec_opd, sec_chan, sec_scan = st.tabs([
-                "🧪 Laboratory", "💊 Pharmacy Profit", "🩺 OPD Income", "👨‍⚕️ Channeling Doc Fees", "🖥️️ Scanning Report"
+                "🧪 Laboratory", "💊 Pharmacy Profit", "🩺 OPD Income", "👨‍⚕️ Channeling Doc Fees", "🖥️ Scanning Report"
             ])
            
             def add_total_row(df_sec):
@@ -640,7 +641,7 @@ with tabs[rep_tab_index]:
                     
                     # ACTION 1: REPRINT RECEIPT
                     with col_act1:
-                        if st.button("🖨️️ Reprint Bill", use_container_width=True, type="primary"):
+                        if st.button("🖨️ Reprint Bill", use_container_width=True, type="primary"):
                             now_str = str(selected_row.get('date'))
                             st.session_state.print_html = f"""
                             <div style="text-align: center;">
@@ -683,7 +684,7 @@ with tabs[rep_tab_index]:
                 st.info("දත්ත නොමැත.")
 
     with main_rep_tab2:
-        st.markdown("### **⚠️ Inventory Risk Reports**")
+        st.markdown("### **⚠️️ Inventory Risk Reports**")
         inv_rep_df = pd.read_sql_query("SELECT * FROM inventory", conn)
         if not inv_rep_df.empty:
             inv_rep_df['expiry_dt'] = pd.to_datetime(inv_rep_df['expiry_date'], errors='coerce')
