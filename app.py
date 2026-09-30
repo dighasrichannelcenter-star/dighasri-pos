@@ -180,7 +180,7 @@ st.title("🏥 Dighasri Channel Center POS System")
 user_role = st.session_state.user['role']
 
 if user_role == "Admin":
-    available_tabs = ["🛒 POS Billing", "📦 Master Settings & Inventory", "📊 Reports & Accounts", "⚙️ User Management"]
+    available_tabs = ["🛒 POS Billing", "📦 Master Settings & Inventory", "📊 Reports & Accounts", "⚙️️ User Management"]
 elif user_role == "Supervisor":
     available_tabs = ["🛒 POS Billing", "📦 Master Settings & Inventory", "📊 Reports & Accounts"]
 else:
@@ -215,7 +215,7 @@ with tabs[0]:
                
             col_b1, col_b2 = st.columns(2)
             with col_b1:
-                if st.button("🗑️️ Clear Cart", use_container_width=True):
+                if st.button("🗑️ Clear Cart", use_container_width=True):
                     st.session_state.pos_cart = []
                     st.rerun()
            
@@ -461,6 +461,12 @@ with tabs[rep_tab_index]:
             try:
                 local_sales = pd.read_sql_query("SELECT * FROM sales_history", conn)
                 if not local_sales.empty and supabase:
+                    # Clear duplicate cloud data first to mirror exact local database
+                    try:
+                        supabase.table("sales_history").delete().neq("id", 0).execute()
+                    except Exception:
+                        pass
+                    
                     success_count = 0
                     for _, row in local_sales.iterrows():
                         data_dict = {
@@ -481,24 +487,14 @@ with tabs[rep_tab_index]:
                             success_count += 1
                         except:
                             pass
-                    st.success(f"✅ ගනුදෙනු {success_count} ක් Cloud එකට සාර්ථකව Sync විය!")
+                    st.success(f"✅ ගනුදෙනු {success_count} ක් Cloud එකට නිවැරදිව Sync විය!")
                 else:
                     st.info("Sync කිරීමට ගනුදෙනු නොමැත හෝ Cloud Connection නොමැත.")
             except Exception as e:
                 st.error(f"Sync Error: {e}")
 
-    # FETCH DIRECTLY FROM BOTH LOCAL & CLOUD SAFELY
-    sales_full_df = pd.DataFrame()
-    if supabase:
-        try:
-            res = supabase.table("sales_history").select("*").order("id", desc=True).execute()
-            if res.data:
-                sales_full_df = pd.DataFrame(res.data)
-        except Exception:
-            pass
-
-    if sales_full_df.empty:
-        sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
+    # FETCH FROM LOCAL DATABASE
+    sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
 
     main_rep_tab1, main_rep_tab2 = st.tabs(["💰 Financial Reports (ගිණුම් වාර්තා)", "⚠️ Expiry & Re-Order Tracking"])
    
@@ -520,7 +516,7 @@ with tabs[rep_tab_index]:
             with col_f3:
                 end_date = st.date_input("අවසාන දිනය (To Date):", value=datetime.now().date())
 
-        # FILTER DATA SAFELY
+        # APPLY FILTER SAFELY
         sales_df = sales_full_df.copy()
         if not sales_df.empty and 'date' in sales_df.columns:
             sales_df['parsed_date'] = pd.to_datetime(sales_df['date'], errors='coerce')
@@ -577,7 +573,7 @@ with tabs[rep_tab_index]:
                 active_sales = sales_df
            
             sec_lab, sec_pharma, sec_opd, sec_chan, sec_scan = st.tabs([
-                "🧪 Laboratory", "💊 Pharmacy Profit", "🩺 OPD Income", "👨‍⚕️ Channeling Doc Fees", "🖥️ Scanning Report"
+                "🧪 Laboratory", "💊 Pharmacy Profit", "🩺 OPD Income", "👨‍⚕️ Channeling Doc Fees", "🖥️️ Scanning Report"
             ])
            
             def add_total_row(df_sec):
@@ -620,12 +616,69 @@ with tabs[rep_tab_index]:
                 scan_sales = active_sales[active_sales['bill_type'] == 'Scanning'] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
                 show_table(add_total_row(scan_sales), use_container_width=True)
 
-        # 3. TRANSACTIONS
+        # 3. TRANSACTIONS WITH REPRINT / DELETE / EDIT MANAGEMENT
         with r_tab_all:
-            st.markdown(f"#### **All Transactions History ({time_filter})**")
+            st.markdown(f"#### **All Transactions History & Actions ({time_filter})**")
+            
             if not sales_df.empty:
                 display_cols = [col for col in sales_df.columns if col != 'parsed_date']
                 show_table(sales_df[display_cols], use_container_width=True)
+                
+                st.markdown("---")
+                st.subheader("🛠 Transaction Management (නැවත ප්‍රින්ට් කිරීම / මකා දැමීම / වෙනස් කිරීම)")
+                
+                col_m1, col_m2 = st.columns([2, 1])
+                with col_m1:
+                    sel_trans_id = st.selectbox("Select Transaction ID (තෝරන්න ID එක):", sales_df['id'].tolist())
+                
+                if sel_trans_id:
+                    selected_row = sales_df[sales_df['id'] == sel_trans_id].iloc[0]
+                    
+                    st.write(f"**Selected Ref:** `{selected_row.get('prescription_no')}` | **Type:** `{selected_row.get('bill_type')}` | **Amount:** `LKR {selected_row.get('total_amount'):.2f}` | **Status:** `{selected_row.get('status')}`")
+                    
+                    col_act1, col_act2, col_act3 = st.columns(3)
+                    
+                    # ACTION 1: REPRINT RECEIPT
+                    with col_act1:
+                        if st.button("🖨️️ Reprint Bill", use_container_width=True, type="primary"):
+                            now_str = str(selected_row.get('date'))
+                            st.session_state.print_html = f"""
+                            <div style="text-align: center;">
+                                <b style="font-size: 8pt;">DIGHASRI CHANNEL CENTER</b><br>
+                                <span>DUPLICATE RECEIPT</span><br>
+                                <small style="font-size: 6.5pt;">{now_str}</small>
+                            </div>
+                            <hr style="border: 1px dashed #000;">
+                            <div style="text-align: center;">Ref No : {selected_row.get('prescription_no')}</div>
+                            <hr style="border: 1px dashed #000;">
+                            <div style="text-align: center;">{selected_row.get('bill_details')}</div>
+                            <hr style="border: 1px dashed #000;">
+                            <div style="text-align: center;"><b>NET TOTAL : LKR {selected_row.get('total_amount'):.2f}</b></div>
+                            <hr style="border: 1px dashed #000;">
+                            <div style="text-align: center;"><small style="font-size: 6.5pt;">Thank You Come Again!</small></div>
+                            """
+                            st.success("✅ Receipt Sent to Printer!")
+                            st.rerun()
+
+                    # ACTION 2: EDIT STATUS (CANCEL / COMPLETE)
+                    with col_act2:
+                        new_status = st.selectbox("Change Status:", ["COMPLETED", "CANCELLED"], index=0 if selected_row.get('status') == "COMPLETED" else 1, key="status_sel")
+                        if st.button("📝 Update Status", use_container_width=True):
+                            c.execute("UPDATE sales_history SET status=? WHERE id=?", (new_status, sel_trans_id))
+                            conn.commit()
+                            st.success(f"Transaction ID {sel_trans_id} status updated to {new_status}!")
+                            st.rerun()
+
+                    # ACTION 3: DELETE TRANSACTION
+                    with col_act3:
+                        if user_role == "Admin":
+                            if st.button("🗑️ Delete Transaction", type="secondary", use_container_width=True):
+                                c.execute("DELETE FROM sales_history WHERE id=?", (sel_trans_id,))
+                                conn.commit()
+                                st.success(f"Transaction ID {sel_trans_id} successfully deleted!")
+                                st.rerun()
+                        else:
+                            st.info("Delete action requires Admin role.")
             else:
                 st.info("දත්ත නොමැත.")
 
