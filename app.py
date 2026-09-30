@@ -426,6 +426,27 @@ if "📦 Master Settings & Inventory" in available_tabs:
     tab_index = available_tabs.index("📦 Master Settings & Inventory")
     with tabs[tab_index]:
         st.subheader("📦 Master Settings & Inventory Management")
+        m_tab1, m_tab2, m_tab3, m_tab4 = st.tabs(["💊 Inventory", "🧪 Lab Tests", "🩺 OPD Procedures", "👨‍⚕️ Doctors"])
+        
+        with m_tab1:
+            st.markdown("#### Manage Inventory Items")
+            inv_all = pd.read_sql_query("SELECT * FROM inventory", conn)
+            show_table(inv_all, use_container_width=True)
+
+        with m_tab2:
+            st.markdown("#### Manage Lab Tests")
+            labs_all = pd.read_sql_query("SELECT * FROM lab_tests", conn)
+            show_table(labs_all, use_container_width=True)
+
+        with m_tab3:
+            st.markdown("#### Manage OPD Procedures")
+            opd_all = pd.read_sql_query("SELECT * FROM opd_procedures", conn)
+            show_table(opd_all, use_container_width=True)
+
+        with m_tab4:
+            st.markdown("#### Manage Doctors")
+            docs_all = pd.read_sql_query("SELECT * FROM doctors", conn)
+            show_table(docs_all, use_container_width=True)
 
 # ---------------------------------------------------------
 # TAB 3: REPORTS & ACCOUNTS
@@ -453,7 +474,7 @@ with tabs[rep_tab_index]:
                             'center_profit': float(row['center_profit']),
                             'cost_price': float(row['cost_price']),
                             'date': str(row['date']),
-                            'status': str(row['status'])
+                            'status': str(row.get('status', 'COMPLETED'))
                         }
                         try:
                             supabase.table("sales_history").insert(data_dict).execute()
@@ -466,33 +487,63 @@ with tabs[rep_tab_index]:
             except Exception as e:
                 st.error(f"Sync Error: {e}")
 
-    # FETCH FROM SUPABASE FOR CLOUD OR LOCAL DATABASE FOR LOCAL APP
-    sales_full_df = pd.DataFrame()
-    if supabase:
+    # FETCH FROM LOCAL DATABASE FIRST TO PRESERVE ALL PAST DATA ACCURATELY
+    sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
+    if sales_full_df.empty and supabase:
         try:
             res = supabase.table("sales_history").select("*").order("id", desc=True).execute()
             if res.data:
                 sales_full_df = pd.DataFrame(res.data)
         except Exception:
             pass
-            
-    if sales_full_df.empty:
-        sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
-   
+
     main_rep_tab1, main_rep_tab2 = st.tabs(["💰 Financial Reports (ගිණුම් වාර්තා)", "⚠️ Expiry & Re-Order Tracking"])
    
     with main_rep_tab1:
+        # DATE FILTER SECTION
+        st.markdown("### 📅 Date Filter Options (දිනයන් අනුව වාර්තා තෝරන්න)")
+        col_f1, col_f2, col_f3 = st.columns([1.5, 1.5, 1.5])
+        
+        with col_f1:
+            time_filter = st.selectbox(
+                "තෝරන්න (Range):", 
+                ["සියල්ල (All Time)", "අද දින (Today)", "මෙම සතියේ (This Week)", "මෙම මාසයේ (This Month)", "දින සිට දින දක්වා (Custom Date)"]
+            )
+
+        start_date, end_date = None, None
+        if time_filter == "දින සිට දින දක්වා (Custom Date)":
+            with col_f2:
+                start_date = st.date_input("ආරම්භක දිනය (From Date):", value=datetime.now().date())
+            with col_f3:
+                end_date = st.date_input("අවසාන දිනය (To Date):", value=datetime.now().date())
+
+        # APPLY DATE FILTER SAFELY WITHOUT DROPPING OLD RECORDS
+        sales_df = sales_full_df.copy()
+        if not sales_df.empty and 'date' in sales_df.columns:
+            sales_df['parsed_date'] = pd.to_datetime(sales_df['date'], errors='coerce')
+            today = datetime.now().date()
+
+            if time_filter == "අද දින (Today)":
+                sales_df = sales_df[sales_df['parsed_date'].dt.date == today]
+            elif time_filter == "මෙම සතියේ (This Week)":
+                start_of_week = today - timedelta(days=today.weekday())
+                sales_df = sales_df[sales_df['parsed_date'].dt.date >= start_of_week]
+            elif time_filter == "මෙම මාසයේ (This Month)":
+                sales_df = sales_df[(sales_df['parsed_date'].dt.month == today.month) & (sales_df['parsed_date'].dt.year == today.year)]
+            elif time_filter == "දින සිට දින දක්වා (Custom Date)" and start_date and end_date:
+                sales_df = sales_df[(sales_df['parsed_date'].dt.date >= start_date) & (sales_df['parsed_date'].dt.date <= end_date)]
+
         r_tab_summary, r_tab_sections, r_tab_all = st.tabs(["🌐 Grand Total Summary", "🏢 Section-Wise Breakdown", "🧾 All Transactions History"])
        
         # 1. GRAND TOTAL SUMMARY
         with r_tab_summary:
-            st.markdown("### **🌐 All-Time Grand Total Summary**")
-            active_sales = pd.DataFrame()
-            if not sales_full_df.empty:
-                if 'status' in sales_full_df.columns:
-                    active_sales = sales_full_df[sales_full_df['status'] == 'COMPLETED']
-                else:
-                    active_sales = sales_full_df
+            st.markdown(f"### **🌐 Grand Total Summary ({time_filter})**")
+            
+            # INCLUDE ALL PAST COMPLETED / UNSTATED RECORDS
+            if not sales_df.empty and 'status' in sales_df.columns:
+                active_sales = sales_df[sales_df['status'].fillna('COMPLETED') != 'CANCELLED']
+            else:
+                active_sales = sales_df
            
             tot_revenue = active_sales['total_amount'].sum() if not active_sales.empty and 'total_amount' in active_sales.columns else 0.0
             tot_doc_pay = active_sales['doc_fee'].sum() if not active_sales.empty and 'doc_fee' in active_sales.columns else 0.0
@@ -517,43 +568,62 @@ with tabs[rep_tab_index]:
 
         # 2. SECTION-WISE BREAKDOWN
         with r_tab_sections:
-            st.markdown("### **🏢 Detailed Section-Wise Breakdown**")
-            active_sales = pd.DataFrame()
-            if not sales_full_df.empty:
-                if 'status' in sales_full_df.columns:
-                    active_sales = sales_full_df[sales_full_df['status'] == 'COMPLETED']
-                else:
-                    active_sales = sales_full_df
+            st.markdown(f"### **🏢 Detailed Section-Wise Breakdown ({time_filter})**")
+            if not sales_df.empty and 'status' in sales_df.columns:
+                active_sales = sales_df[sales_df['status'].fillna('COMPLETED') != 'CANCELLED']
+            else:
+                active_sales = sales_df
            
             sec_lab, sec_pharma, sec_opd, sec_chan, sec_scan = st.tabs([
                 "🧪 Laboratory", "💊 Pharmacy Profit", "🩺 OPD Income", "👨‍⚕️ Channeling Doc Fees", "🖥️ Scanning Report"
             ])
            
+            def add_total_row(df_sec):
+                if df_sec.empty:
+                    return df_sec
+                
+                df_calc = df_sec.copy()
+                total_row = {}
+                
+                for col in df_calc.columns:
+                    if col in ['total_amount', 'doc_fee', 'lab_cost', 'center_profit', 'cost_price', 'discount']:
+                        total_row[col] = df_calc[col].sum()
+                    elif col in ['id', 'prescription_no', 'bill_type', 'doctor_name', 'status', 'parsed_date']:
+                        total_row[col] = ""
+                    elif col == 'bill_details':
+                        total_row[col] = "TOTAL"
+                    else:
+                        total_row[col] = ""
+                
+                total_df = pd.DataFrame([total_row])
+                return pd.concat([df_calc, total_df], ignore_index=True)
+
             with sec_lab:
                 lab_sales = active_sales[active_sales['bill_type'] == 'Laboratory'] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
-                show_table(lab_sales, use_container_width=True)
+                show_table(add_total_row(lab_sales), use_container_width=True)
 
             with sec_pharma:
                 pharma_sales = active_sales[active_sales['bill_type'] == 'Pharmacy'] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
-                show_table(pharma_sales, use_container_width=True)
+                show_table(add_total_row(pharma_sales), use_container_width=True)
 
             with sec_opd:
-                opd_sales = active_sales[active_sales['bill_type'] == 'OPD'] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
-                show_table(opd_sales, use_container_width=True)
+                opd_sales = active_sales[active_sales['bill_type'].isin(['OPD', 'OPD Consultation', 'OPD Procedure'])] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
+                show_table(add_total_row(opd_sales), use_container_width=True)
 
             with sec_chan:
                 chan_sales = active_sales[active_sales['bill_type'] == 'Channeling'] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
-                show_table(chan_sales, use_container_width=True)
+                show_table(add_total_row(chan_sales), use_container_width=True)
 
             with sec_scan:
                 scan_sales = active_sales[active_sales['bill_type'] == 'Scanning'] if not active_sales.empty and 'bill_type' in active_sales.columns else pd.DataFrame()
-                show_table(scan_sales, use_container_width=True)
+                show_table(add_total_row(scan_sales), use_container_width=True)
 
         # 3. TRANSACTIONS
         with r_tab_all:
-            st.markdown("#### **All Transactions History**")
-            if not sales_full_df.empty:
-                show_table(sales_full_df, use_container_width=True)
+            st.markdown(f"#### **All Transactions History ({time_filter})**")
+            if not sales_df.empty:
+                display_cols = [col for col in sales_df.columns if col != 'parsed_date']
+                show_table(sales_df[display_cols], use_container_width=True)
             else:
                 st.info("දත්ත නොමැත.")
 
@@ -561,7 +631,7 @@ with tabs[rep_tab_index]:
         st.markdown("### **⚠️ Inventory Risk Reports**")
         inv_rep_df = pd.read_sql_query("SELECT * FROM inventory", conn)
         if not inv_rep_df.empty:
-            inv_rep_df['expiry_dt'] = pd.to_datetime(inv_rep_df['expiry_date'])
+            inv_rep_df['expiry_dt'] = pd.to_datetime(inv_rep_df['expiry_date'], errors='coerce')
             today = pd.to_datetime(datetime.now().date())
             three_months = today + pd.DateOffset(months=3)
            
@@ -579,9 +649,9 @@ with tabs[rep_tab_index]:
 # ---------------------------------------------------------
 # TAB 4: USER MANAGEMENT
 # ---------------------------------------------------------
-if "⚙ User Management" in available_tabs:
-    user_tab_index = available_tabs.index("⚙ User Management")
+if "⚙️ User Management" in available_tabs:
+    user_tab_index = available_tabs.index("⚙️ User Management")
     with tabs[user_tab_index]:
-        st.subheader("⚙️ User Management & Passwords (Admin Only)")
+        st.subheader("⚙️️ User Management & Passwords (Admin Only)")
         users_df = pd.read_sql_query("SELECT username, role FROM users", conn)
         show_table(users_df, use_container_width=True)
