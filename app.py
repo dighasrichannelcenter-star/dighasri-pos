@@ -215,7 +215,7 @@ with tabs[0]:
                
             col_b1, col_b2 = st.columns(2)
             with col_b1:
-                if st.button("🗑️ Clear Cart", use_container_width=True):
+                if st.button("🗑️️ Clear Cart", use_container_width=True):
                     st.session_state.pos_cart = []
                     st.rerun()
            
@@ -487,15 +487,18 @@ with tabs[rep_tab_index]:
             except Exception as e:
                 st.error(f"Sync Error: {e}")
 
-    # FETCH FROM LOCAL DATABASE FIRST TO PRESERVE ALL PAST DATA ACCURATELY
-    sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
-    if sales_full_df.empty and supabase:
+    # FETCH DIRECTLY FROM BOTH LOCAL & CLOUD SAFELY
+    sales_full_df = pd.DataFrame()
+    if supabase:
         try:
             res = supabase.table("sales_history").select("*").order("id", desc=True).execute()
             if res.data:
                 sales_full_df = pd.DataFrame(res.data)
         except Exception:
             pass
+
+    if sales_full_df.empty:
+        sales_full_df = pd.read_sql_query("SELECT * FROM sales_history ORDER BY id DESC", conn)
 
     main_rep_tab1, main_rep_tab2 = st.tabs(["💰 Financial Reports (ගිණුම් වාර්තා)", "⚠️ Expiry & Re-Order Tracking"])
    
@@ -517,7 +520,7 @@ with tabs[rep_tab_index]:
             with col_f3:
                 end_date = st.date_input("අවසාන දිනය (To Date):", value=datetime.now().date())
 
-        # APPLY DATE FILTER SAFELY WITHOUT DROPPING OLD RECORDS
+        # FILTER DATA SAFELY
         sales_df = sales_full_df.copy()
         if not sales_df.empty and 'date' in sales_df.columns:
             sales_df['parsed_date'] = pd.to_datetime(sales_df['date'], errors='coerce')
@@ -539,7 +542,6 @@ with tabs[rep_tab_index]:
         with r_tab_summary:
             st.markdown(f"### **🌐 Grand Total Summary ({time_filter})**")
             
-            # INCLUDE ALL PAST COMPLETED / UNSTATED RECORDS
             if not sales_df.empty and 'status' in sales_df.columns:
                 active_sales = sales_df[sales_df['status'].fillna('COMPLETED') != 'CANCELLED']
             else:
@@ -652,6 +654,6 @@ with tabs[rep_tab_index]:
 if "⚙️ User Management" in available_tabs:
     user_tab_index = available_tabs.index("⚙️ User Management")
     with tabs[user_tab_index]:
-        st.subheader("⚙️️ User Management & Passwords (Admin Only)")
+        st.subheader("⚙️ User Management & Passwords (Admin Only)")
         users_df = pd.read_sql_query("SELECT username, role FROM users", conn)
         show_table(users_df, use_container_width=True)
