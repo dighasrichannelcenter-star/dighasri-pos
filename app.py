@@ -324,7 +324,6 @@ with tabs[0]:
         with sub_tab2:
             inv_df = pd.read_sql_query("SELECT * FROM inventory WHERE stock_qty > 0", conn)
             if not inv_df.empty:
-                # Updated label to show batch and price for easy differentiation
                 inv_df['display_label'] = inv_df['item_name'] + " (" + inv_df['brand_name'] + ") [Batch: " + inv_df['batch_no'] + " | LKR " + inv_df['unit_price'].astype(str) + "]"
                 col_p1, col_p2 = st.columns([2, 1])
                 with col_p1:
@@ -480,16 +479,38 @@ if "📦 Master Settings & Inventory" in available_tabs:
                     cat = st.selectbox("Category (කාණ්ඩය):", ["Medicine (ඖෂධ)", "Non-Medicine (ඖෂධ නොවන)"])
                     i_name = st.text_input("Item Name (නම):")
                     b_name = st.text_input("Brand Name (වෙළඳ නාමය):")
-                    dosage = st.text_input("Dosage / Size (උදා: 500mg, 10ml, Single):")
+                    dosage = st.text_input("Dosage / Size (උදා: 500mg, 10ml, Syrup 100ml):")
                 with c2:
                     supplier = st.text_input("Supplier Name:")
                     invoice_no = st.text_input("Invoice No (ඉන්වොයිස් අංකය):")
-                    cost_p = st.number_input("Cost Price (LKR):", min_value=0.0, step=10.0)
-                    unit_p = st.number_input("Unit Price (LKR):", min_value=0.0, step=10.0)
+                    
+                    # --- AUTO CALCULATE PRICE & PROFIT LOGIC ---
+                    calc_mode = st.radio("Calculation Mode:", ["📦 Box / Bulk Pricing (මුළු පෙට්ටියේ මිල)", "💧 Liquid / Per Unit (සිරප්/මිලිලීටර් සඳහා)"], horizontal=True)
+                    
+                    if calc_mode == "📦 Box / Bulk Pricing (මුළු පෙට්ටියේ මිල)":
+                        total_box_cost = st.number_input("Total Box Cost Price (මුළු පෙට්ටියේ මිල LKR):", min_value=0.0, value=100.0, step=10.0)
+                        total_items_in_box = st.number_input("Total Qty in Box (පෙට්ටියේ ඇති මුළු පෙති/ගණන):", min_value=1, value=100, step=1)
+                        
+                        cost_p = total_box_cost / total_items_in_box if total_items_in_box > 0 else 0.0
+                        st.info(f"💡 Calculated Unit Cost (එකක මිල): LKR {cost_p:.2f}")
+                        
+                        unit_p = st.number_input("Selling Price per Unit / Tablet (විකුණුම් මිල LKR):", min_value=0.0, value=float(cost_p * 1.2), step=1.0)
+                        stock_q = total_items_in_box
+                    else:
+                        total_bottle_cost = st.number_input("Total Bottle Cost Price (සම්පූර්ණ බෝතලයේ මිල LKR):", min_value=0.0, value=300.0, step=10.0)
+                        total_mls = st.number_input("Total Volume in ml (බෝතලයේ ඇති මුළු ml ප්‍රමාණය):", min_value=1, value=100, step=1)
+                        
+                        cost_p = total_bottle_cost / total_mls if total_mls > 0 else 0.0
+                        st.info(f"💡 Calculated Cost per 1ml (මිලිලීටර් 1 ක මිල): LKR {cost_p:.2f}")
+                        
+                        unit_p = st.number_input("Selling Price per 1ml (1ml සඳහා විකුණුම් මිල LKR):", min_value=0.0, value=float(cost_p * 1.2), step=1.0)
+                        stock_q = total_mls
+
                     profit_m = unit_p - cost_p
-                    st.info(f"Calculated Margin: LKR {profit_m:.2f}")
+                    profit_margin_pct = (profit_m / cost_p * 100) if cost_p > 0 else 0.0
+                    st.success(f"📈 Profit per unit: LKR {profit_m:.2f} ({profit_margin_pct:.1f}%)")
+
                 with c3:
-                    stock_q = st.number_input("Stock Qty:", min_value=0, step=10)
                     reorder_l = st.number_input("Re-order Level:", min_value=0, value=10)
                     exp_d = st.date_input("Expiry Date:", value=datetime.now().date() + timedelta(days=365))
                     batch_n = st.text_input("Batch No:")
@@ -764,7 +785,7 @@ if "📦 Master Settings & Inventory" in available_tabs:
 
                     if st.button("🔄 Update Doctor Profile"):
                         c.execute("UPDATE doctors SET doc_name=?, designation=?, doc_fee=?, center_fee=?, doc_scan_fee=?, center_scan_fee=? WHERE id=?",
-                                  (dn_e, des_e, dfc_e, cfc_e, dfs_e, cfs_e, doc_id))
+                              (dn_e, des_e, dfc_e, cfc_e, dfs_e, cfs_e, doc_id))
                         conn.commit()
                         st.success("✅ Doctor profile updated!")
                         st.rerun()
